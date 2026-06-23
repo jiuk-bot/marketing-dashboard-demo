@@ -546,27 +546,37 @@ elif active == TAB_NAMES[1]:
                                    name="CTR", line=dict(color=AMBER, width=2)))
             f.update_xaxes(tickformat="%-m월 %-d일"); st.plotly_chart(chart(f), use_container_width=True)
 
-        st.markdown("##### 🔎 드릴다운 (단위 선택 + 복수 선택)")
-        unit = st.radio("보기 단위", ["캠페인", "광고그룹", "소재"], horizontal=True, key="d_unit")
-        dd = d.copy()
-        if unit == "캠페인":
-            gb, lbl = "campaign", "캠페인"
-        elif unit == "광고그룹":
-            dd["_k"] = dd.campaign + " · " + dd.adgroup; gb, lbl = "_k", "광고그룹"
-        else:
-            dd["_k"] = dd.campaign + " · " + dd.adgroup + " · " + dd.creative.astype(str); gb, lbl = "_k", "소재"
-        _opts = sorted(dd[gb].unique())
-        _sel = st.multiselect(f"{lbl} 선택 (비우면 전체 · 검색 가능)", _opts, default=[], key=f"d_msel_{unit}")
-        if _sel:
-            dd = dd[dd[gb].isin(_sel)]
-        t = metrics(dd.groupby(gb, as_index=False)[["spend", "impressions", "clicks", "conversions", "revenue"]].sum()).sort_values("conversions", ascending=False)
-        ddisp = pd.DataFrame({
-            lbl: t[gb], "비용": t.spend.map(won),
-            "노출": t.impressions.map(lambda x: f"{int(x):,}"), "클릭": t.clicks.map(lambda x: f"{int(x):,}"),
-            "전환": t.conversions.map(lambda x: f"{int(x):,}"), "CPA": t.CPA.map(won),
-            "CTR(%)": t.CTR.map(lambda x: f"{x:.2f}"), "CVR(%)": t.CVR.map(lambda x: f"{x:.2f}"),
-            "ROAS(%)": t.ROAS.map(lambda x: f"{int(x):,}%")})
-        st.dataframe(ddisp, use_container_width=True, hide_index=True)
+        st.markdown("##### 🔎 단계별 원인 추적 (캠페인 → 광고그룹 → 소재)")
+        st.caption("캠페인을 고르면 그 안의 광고그룹이, 광고그룹을 고르면 그 안의 소재가 단계적으로 펼쳐집니다. 성과가 나빠진 지점을 한 단계씩 좁혀 찾으세요.")
+
+        def _ddtbl(frame, gb, lbl):
+            t = metrics(frame.groupby(gb, as_index=False)[["spend", "impressions", "clicks", "conversions", "revenue"]].sum()).sort_values("conversions", ascending=False)
+            return pd.DataFrame({
+                lbl: t[gb], "비용": t.spend.map(won),
+                "노출": t.impressions.map(lambda x: f"{int(x):,}"), "클릭": t.clicks.map(lambda x: f"{int(x):,}"),
+                "전환": t.conversions.map(lambda x: f"{int(x):,}"), "CPA": t.CPA.map(won),
+                "CTR(%)": t.CTR.map(lambda x: f"{x:.2f}"), "CVR(%)": t.CVR.map(lambda x: f"{x:.2f}"),
+                "ROAS(%)": t.ROAS.map(lambda x: f"{int(x):,}%")})
+
+        # 1단계 · 캠페인
+        st.markdown("**1단계 · 캠페인**")
+        st.dataframe(_ddtbl(d, "campaign", "캠페인"), use_container_width=True, hide_index=True)
+        camp_sel = st.multiselect("👉 조회할 캠페인 선택 (비우면 여기까지)", sorted(d.campaign.unique()), default=[], key="dd_camp")
+
+        # 2단계 · 광고그룹 (선택한 캠페인 안)
+        if camp_sel:
+            d2 = d[d.campaign.isin(camp_sel)].copy()
+            d2["_ag"] = d2.campaign + " · " + d2.adgroup
+            st.markdown("**2단계 · 광고그룹** — 선택한 캠페인 내부")
+            st.dataframe(_ddtbl(d2, "_ag", "광고그룹"), use_container_width=True, hide_index=True)
+            ag_sel = st.multiselect("👉 조회할 광고그룹 선택 (비우면 여기까지)", sorted(d2["_ag"].unique()), default=[], key="dd_ag")
+
+            # 3단계 · 소재 (선택한 광고그룹 안)
+            if ag_sel:
+                d3 = d2[d2["_ag"].isin(ag_sel)].copy()
+                d3["_cr"] = d3.campaign + " · " + d3.adgroup + " · " + d3.creative.astype(str)
+                st.markdown("**3단계 · 소재** — 선택한 광고그룹 내부")
+                st.dataframe(_ddtbl(d3, "_cr", "소재"), use_container_width=True, hide_index=True)
     else:
         cc = st.columns(4)
         a1 = cc[0].date_input("기간 A 시작", value=TODAY - pd.Timedelta(days=27), min_value=df.date.min(), max_value=TODAY, key="dc_a1")
@@ -595,25 +605,30 @@ elif active == TAB_NAMES[1]:
         st.markdown("##### 📡 매체별 A vs B (전체 요약)")
         st.dataframe(_cmp(A, B, "channel", "매체"), use_container_width=True, hide_index=True)
 
-        st.markdown("##### 🔎 드릴다운 A vs B (단위 선택 + 복수 선택)")
-        unit = st.radio("비교 단위", ["캠페인", "광고그룹", "소재"], horizontal=True, key="dc_unit")
-        _Ax = A.copy(); _Bx = B.copy()
-        if unit == "캠페인":
-            gb, lbl = "campaign", "캠페인"
-        elif unit == "광고그룹":
-            _Ax["_k"] = _Ax.campaign + " · " + _Ax.adgroup
-            _Bx["_k"] = _Bx.campaign + " · " + _Bx.adgroup
-            gb, lbl = "_k", "광고그룹"
-        else:
-            _Ax["_k"] = _Ax.campaign + " · " + _Ax.adgroup + " · " + _Ax.creative.astype(str)
-            _Bx["_k"] = _Bx.campaign + " · " + _Bx.adgroup + " · " + _Bx.creative.astype(str)
-            gb, lbl = "_k", "소재"
-        _opts = sorted(set(_Ax[gb]) | set(_Bx[gb]))
-        _sel = st.multiselect(f"{lbl} 선택 (비우면 전체 · 검색 가능)", _opts, default=[], key=f"dc_msel_{unit}")
-        if _sel:
-            _Ax = _Ax[_Ax[gb].isin(_sel)]; _Bx = _Bx[_Bx[gb].isin(_sel)]
-        st.dataframe(_cmp(_Ax, _Bx, gb, lbl), use_container_width=True, hide_index=True)
-        st.caption("전환 변화 ↑ / CPA 변화 ↓ 이면 개선. 비교 단위를 고르고, 비교할 항목을 복수 선택하세요. (위는 매체별 전체 요약)")
+        st.markdown("##### 🔎 단계별 원인 추적 A vs B (캠페인 → 광고그룹 → 소재)")
+        st.caption("캠페인을 고르면 그 안의 광고그룹이, 광고그룹을 고르면 그 안의 소재가 단계적으로 펼쳐집니다. 전환 변화 ↑ / CPA 변화 ↓ 이면 개선.")
+
+        # 1단계 · 캠페인
+        st.markdown("**1단계 · 캠페인**")
+        st.dataframe(_cmp(A, B, "campaign", "캠페인"), use_container_width=True, hide_index=True)
+        dc_camp = st.multiselect("👉 조회할 캠페인 선택 (비우면 여기까지)", sorted(set(A.campaign) | set(B.campaign)), default=[], key="dc_camp")
+
+        # 2단계 · 광고그룹 (선택한 캠페인 안)
+        if dc_camp:
+            A2 = A[A.campaign.isin(dc_camp)].copy(); B2 = B[B.campaign.isin(dc_camp)].copy()
+            A2["_ag"] = A2.campaign + " · " + A2.adgroup
+            B2["_ag"] = B2.campaign + " · " + B2.adgroup
+            st.markdown("**2단계 · 광고그룹** — 선택한 캠페인 내부")
+            st.dataframe(_cmp(A2, B2, "_ag", "광고그룹"), use_container_width=True, hide_index=True)
+            dc_ag = st.multiselect("👉 조회할 광고그룹 선택 (비우면 여기까지)", sorted(set(A2["_ag"]) | set(B2["_ag"])), default=[], key="dc_ag")
+
+            # 3단계 · 소재 (선택한 광고그룹 안)
+            if dc_ag:
+                A3 = A2[A2["_ag"].isin(dc_ag)].copy(); B3 = B2[B2["_ag"].isin(dc_ag)].copy()
+                A3["_cr"] = A3.campaign + " · " + A3.adgroup + " · " + A3.creative.astype(str)
+                B3["_cr"] = B3.campaign + " · " + B3.adgroup + " · " + B3.creative.astype(str)
+                st.markdown("**3단계 · 소재** — 선택한 광고그룹 내부")
+                st.dataframe(_cmp(A3, B3, "_cr", "소재"), use_container_width=True, hide_index=True)
 
 # ============================================================
 # 3) 🔬 A/B테스트
