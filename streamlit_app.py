@@ -1231,7 +1231,6 @@ elif active == TAB_NAMES[8]:
     _ms1, _ms2 = st.columns([1, 2])
     msel = _ms1.selectbox("📊 코호트 지표", list(METRICS), index=0, key="coh_metric")
     mc = METRICS[msel]
-    _ms2.caption(f"💡 **왜 이 지표?** {mc['why']}")
     st.caption(f"세로축=캠페인(지역), 가로축=투입 후 경과 주차(W+0=시작), 셀={mc['name']} (옅을수록 좋음 → **진할수록 나쁨**). "
                "캠페인마다 시작일이 달라서 행을 시작 순으로 정렬 → **↙ 대각선(점선)이 '같은 달력 시점'** 으로, "
                "시즌·경쟁 같은 외부 영향을 읽을 수 있습니다.")
@@ -1396,8 +1395,7 @@ elif active == TAB_NAMES[8]:
                       yaxis2=dict(title="CPA(원)", overlaying="y", side="right", showgrid=False, hoverformat=",.0f"),
                       legend=dict(orientation="h", yanchor="bottom", y=1.04, x=0))
     st.plotly_chart(lf2, use_container_width=True)
-    st.caption("✅ 읽는 법: **CVR(초록)이 먼저 꺾이고 → 중복DB율(노랑)이 따라 오르고 → CPA(인디고)가 마지막에 치솟으면** 풀 소진 확정. "
-               "빨간 점선(중복 30% 돌파) 전후가 재세팅 검토 구간입니다. (왼쪽 축 = %, 오른쪽 축 = CPA 원)")
+    st.caption("✅ **CVR↓ → 중복DB율↑ → CPA↑** 순이면 풀 소진. 빨간 점선(중복 30%) 전후 = 재세팅 구간. (좌축 %, 우축 CPA)")
 
 
 # ============================================================
