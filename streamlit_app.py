@@ -224,9 +224,12 @@ def _render_demo_chatbot():
     _pw = "260px" if _min else ("82vw" if _full else "400px")
     _ih = 620 if _full else 430
     st.markdown(f"""<style>
-    .st-key-dcmo {{ position:fixed !important; right:16px; bottom:16px; width:{_pw}; overflow:visible;
+    .st-key-dcmo {{ position:fixed !important; right:16px; bottom:16px; width:{_pw}; max-width:calc(100vw - 32px);
+        overflow:visible; box-sizing:border-box;
         background:#fff; border:1px solid rgba(0,0,0,.18); border-radius:14px;
         box-shadow:0 8px 30px rgba(0,0,0,.45); padding:4px 14px 10px; z-index:999999; }}
+    .st-key-dcmo [data-testid="stHorizontalBlock"] {{ gap:8px !important; flex-wrap:nowrap !important; }}
+    .st-key-dcmo [data-testid="stHorizontalBlock"] > div {{ min-width:0 !important; }}
     .st-key-dcmo [data-testid="stCaptionContainer"] * {{ color:#6b7280 !important; }}
     .st-key-dcmo [data-testid="stMarkdownContainer"] * {{ color:#1a1a1a !important; }}
     .st-key-dcmo button {{ background:#eef0f4 !important; color:#1a1a1a !important;
