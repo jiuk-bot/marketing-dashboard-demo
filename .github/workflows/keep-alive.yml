@@ -1,9 +1,10 @@
 name: keep-alive
 
-# 데모가 비활성으로 잠들지 않게 6시간마다 자동 방문(깨움)
+# 포트폴리오 데모(AI CMO)가 잠들지 않게, 2시간마다 실제 브라우저(Playwright)로 방문한다.
+#  → Streamlit Community Cloud의 sleep 타이머를 리셋하고, 혹시 자고 있으면 wake 버튼을 눌러 깨운다.
 on:
   schedule:
-    - cron: "0 */6 * * *"   # 매 6시간 (UTC) — 하루 4회
+    - cron: "0 */2 * * *"   # 2시간마다 (UTC) — 하루 12회, sleep 방지 충분 마진
   workflow_dispatch:          # Actions 탭에서 수동 실행 버튼
 
 jobs:
