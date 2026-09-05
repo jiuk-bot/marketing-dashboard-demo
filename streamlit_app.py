@@ -48,8 +48,8 @@ div[data-testid="stExpander"] {{ background:{CARD}; border:1px solid {BORDER}; b
 section[data-testid="stSidebar"] {{ background:#0a0a0c; border-right:1px solid {BORDER}; }}
 .demo-banner {{ background:rgba(99,102,241,.12); color:#a5b4fc; border:1px solid rgba(99,102,241,.3);
     border-radius:10px; padding:9px 14px; font-size:12.5px; font-weight:600; margin-bottom:16px; }}
-div[role="radiogroup"] {{ gap:18px; flex-wrap:nowrap; overflow-x:auto; border-bottom:1px solid {BORDER}; margin-bottom:18px; padding-bottom:0; }}
-div[role="radiogroup"] > label {{ margin:0 !important; padding:0 2px 10px 2px; border-bottom:2px solid transparent; white-space:nowrap; flex:0 0 auto; }}
+div[role="radiogroup"] {{ gap:6px 16px; flex-wrap:wrap; overflow-x:visible; border-bottom:1px solid {BORDER}; margin-bottom:18px; padding-bottom:0; }}
+div[role="radiogroup"] > label {{ margin:0 !important; padding:0 2px 9px 2px; border-bottom:2px solid transparent; white-space:nowrap; flex:0 0 auto; }}
 div[role="radiogroup"] > label > div:first-child {{ display:none !important; }}
 div[role="radiogroup"] > label p {{ font-size:14px; font-weight:600; color:{MUTED}; transition:color .15s; }}
 div[role="radiogroup"] > label:hover p {{ color:{TEXT}; }}
@@ -125,6 +125,58 @@ def chart(fig, h=320):
     fig.update_xaxes(showgrid=False, linecolor=BORDER)
     fig.update_yaxes(showgrid=True, gridcolor=BORDER, zeroline=False, hoverformat=",.0f")
     return fig
+
+
+# ============================================================
+# 가상 병원 내원 퍼널 데이터 (실제 클라이언트 수치 아님 · 방법론 시연용)
+#   병원 매출 구조 = 3단계 퍼널:
+#     1단계 DB생성(마케팅)  → DB수 / DB단가
+#     2단계 DB→내원(TM·DB품질) → 내원율
+#     3단계 내원→결제(상담실장)  → 객단가
+#   핵심 항등식:  ROAS = 내원율 × 객단가 ÷ DB단가
+# ============================================================
+@st.cache_data
+def gen_funnel():
+    # 매체 × 지역 × 월 (실제 클라이언트 수치 아님 · 방법론 시연)
+    # Google Ads = 지역별 운영 / Meta·TikTok = 전국 단일 (다른 탭 매체명과 통일)
+    # (지역 튜플 = DB수, DB단가, 내원율%, 객단가원)
+    G_MAIN = {
+        "4월": {"경기도": (1200, 58000, 8.3, 2.46e6), "충청도": (1780, 50000, 2.9, 3.30e6),
+                "경북대구": (1660, 37000, 0.5, 1.70e6), "인천": (900, 44000, 1.4, 2.60e6), "전북강원": (600, 47000, 3.0, 3.00e6)},
+        "5월": {"경기도": (1310, 62000, 10.6, 2.55e6), "충청도": (1870, 50000, 3.4, 3.00e6),
+                "경북대구": (1190, 41000, 1.1, 1.90e6), "인천": (890, 50000, 1.6, 2.90e6), "전북강원": (560, 46000, 3.8, 3.20e6)},
+        "6월": {"경기도": (980, 72000, 11.0, 2.60e6), "충청도": (1120, 54000, 4.1, 4.20e6),
+                "경북대구": (720, 44000, 0.9, 1.60e6), "인천": (900, 52000, 1.2, 3.30e6), "전북강원": (500, 45000, 4.3, 5.10e6)},
+    }
+    META = {"4월": (1800, 15000, 1.6, 3.30e6), "5월": (1950, 17000, 1.3, 4.20e6), "6월": (1340, 20000, 2.6, 3.50e6)}
+    TIKTOK = {"4월": (410, 45000, 2.4, 3.20e6), "5월": (230, 58000, 4.4, 2.30e6), "6월": (245, 82000, 8.2, 3.60e6)}
+    rows = []
+
+    def _add(m, media, region, db, dbc, vr, arpu):
+        visits = db * vr / 100
+        spend = db * dbc
+        rev = visits * arpu
+        rows.append(dict(month=m, media=media, region=region, DB수=db, DB단가=dbc, 광고비=spend,
+                         내원율=vr, 내원수=visits, 수납=rev, 객단가=arpu,
+                         내원당단가=(spend / visits if visits else 0), ROAS=(rev / spend * 100 if spend else 0)))
+    for m, regs in G_MAIN.items():
+        for r, (db, dbc, vr, arpu) in regs.items():
+            _add(m, "Google Ads", r, db, dbc, vr, arpu)
+        _add(m, "Meta", "전국", *META[m])
+        _add(m, "TikTok", "전국", *TIKTOK[m])
+    df = pd.DataFrame(rows)
+    df["DB비율"] = df.groupby(["month", "media"])["DB수"].transform(lambda s: s / s.sum() * 100)
+    return df
+
+
+def _funnel_totals(fdf, month, media="전체"):
+    """월(+매체) 가중 집계. ROAS = 내원율 × 객단가 ÷ DB단가 항등식 유지."""
+    s = fdf[fdf.month == month]
+    if media and media != "전체":
+        s = s[s.media == media]
+    db, sp, v, rev = s.DB수.sum(), s.광고비.sum(), s.내원수.sum(), s.수납.sum()
+    return dict(DB수=db, DB단가=sp / db, 내원율=v / db * 100, 내원수=v,
+                객단가=rev / v, 내원당단가=sp / v, 수납=rev, 광고비=sp, ROAS=rev / sp * 100)
 
 
 def won(v): return f"₩{int(v):,}"
@@ -426,17 +478,23 @@ _dcomp.html("""<script>
 with st.sidebar:
     st.markdown('<div style="font-size:17px;font-weight:700;white-space:nowrap;margin:2px 0 6px;">📊 윤지욱 마케팅 대시보드</div>', unsafe_allow_html=True)
     st.caption("캠페인 성과 모니터링 + AI 시뮬레이션")
-    st.button("⚡ API 데이터 동기화", type="primary", use_container_width=True, key="sync")
-    st.caption(f"마지막 동기화: {TODAY.strftime('%Y-%m-%d')} 14:30")
-    st.caption(f"데이터: {df['date'].min().strftime('%m/%d')} ~ {TODAY.strftime('%m/%d')}")
 
 st.markdown("# 📊 윤지욱 마케팅 대시보드")
-st.markdown('<div class="demo-banner">데모 버전 · 표시 수치는 모두 가상 데이터입니다 (실제 광고주 데이터 아님). '
-            'Claude Code로 직접 개발한 실제 운영 대시보드의 데모입니다.</div>', unsafe_allow_html=True)
+st.markdown('<div class="demo-banner">데모 버전 · 표시 수치는 모두 가상 데이터입니다 (실제 광고주 데이터 아님).</div>', unsafe_allow_html=True)
 
 CHS = ["Google Ads", "Meta", "TikTok"]
-TAB_NAMES = ["📊 실시간", "📅 일자별", "🎬 크리에이티브", "🔬 A/B", "🆕 신규소재", "🔁 중복DB", "📺 노출 유튜브 채널", "🔍 경쟁사 실시간 스크랩", "📊 코호트", "🎯 KPI"]
-active = st.radio("탭 네비게이션", TAB_NAMES, horizontal=True, label_visibility="collapsed", key="active_tab")
+TAB_NAMES = ["📊 실시간", "📅 일자별", "🎬 크리에이티브", "🔬 A/B", "🆕 신규소재", "🔁 중복DB", "📺 노출 유튜브 채널", "🔍 경쟁사 실시간 스크랩", "📊 코호트", "🎯 KPI", "🏥 퍼널 단계별 성과진단"]
+# 표시 순서: 실시간 → 퍼널 → 나머지 (dispatch는 TAB_NAMES 인덱스 그대로 사용하므로 표시 리스트만 재정렬)
+_TAB_DISPLAY = [TAB_NAMES[0], TAB_NAMES[10]] + TAB_NAMES[1:10]
+active = st.radio("탭 네비게이션", _TAB_DISPLAY, horizontal=True, label_visibility="collapsed", key="active_tab")
+
+# ── API 동기화 (탭 하단 배치) ──
+_sync_c = st.columns([1.4, 3])
+with _sync_c[0]:
+    st.button("⚡ API 데이터 동기화", type="primary", use_container_width=True, key="sync")
+with _sync_c[1]:
+    st.caption(f"마지막 동기화: {TODAY.strftime('%Y-%m-%d')} 14:30 · 데이터 {df['date'].min().strftime('%m/%d')} ~ {TODAY.strftime('%m/%d')}")
+st.divider()
 
 # ============================================================
 # 1) 📊 금일
@@ -1512,3 +1570,121 @@ elif active == TAB_NAMES[9]:
       <span style="color:{GREEN}">초록 +n(초과)</span> / <span style="color:{RED}">빨강 -n(미달)</span></div>
     </body></html>"""
     _dcomp.html(_cal_html, height=44 + _rows_n * 102 + 48, scrolling=False)
+
+
+# ============================================================
+# 퍼널 단계별 성과진단 — 매출 3단계 퍼널(DB생성→내원→결제) 병목 진단
+# ============================================================
+elif active == TAB_NAMES[10]:
+    import plotly.graph_objects as _go
+    fdf = gen_funnel()
+    _MON = ["4월", "5월", "6월"]
+
+    st.markdown("### 퍼널 단계별 성과진단")
+    st.caption("매출은 **① DB생성 → ② 내원 → ③ 결제** 3단계를 거칩니다. 각 단계를 담당 팀·활동으로 나눠 "
+               "어느 단계가 매월 병목인지 진단합니다.")
+
+    # ── 단계별 담당 팀·활동 (담백하게) ──
+    _stg = [
+        ("① DB 생성", "마케팅팀", "리드(DB) 확보", ACCENT),
+        ("② 내원 전환", "TM·전화상담팀", "전화 상담·내원 유도", GREEN),
+        ("③ 상담·결제", "상담실장", "대면 상담·결제", AMBER),
+    ]
+    _sc = st.columns(3)
+    for _col, (_t, _team, _act, _clr) in zip(_sc, _stg):
+        _col.markdown(
+            f"<div style='background:{CARD};border:1px solid {BORDER};border-left:3px solid {_clr};"
+            f"border-radius:12px;padding:14px 16px;'>"
+            f"<div style='font-size:15px;font-weight:800;color:{TEXT}'>{_t}</div>"
+            f"<div style='font-size:13px;font-weight:700;color:{_clr};margin:3px 0 6px'>{_team}</div>"
+            f"<div style='font-size:13px;color:{MUTED};line-height:1.5'>{_act}</div>"
+            f"</div>", unsafe_allow_html=True)
+
+    # ── 필터 (조회 월 · 매체) ──
+    _fc1, _fc2 = st.columns(2)
+    _sel = _fc1.selectbox("조회 월", _MON, index=len(_MON) - 1, key="funnel_month")
+    _media_opts = ["전체"] + list(fdf.media.unique())
+    _selm = _fc2.selectbox("매체", _media_opts, index=0, key="funnel_media")
+    _pi = _MON.index(_sel)
+    _prevm = _MON[_pi - 1] if _pi > 0 else None
+
+    def _bn(r):
+        if r.내원율 < 2.0:
+            return "🔴 2단계 내원율"
+        if r.객단가 < 2.4e6:
+            return "🟡 3단계 객단가"
+        if r.DB단가 > 60000:
+            return "🟡 1단계 DB단가"
+        return "🟢 양호"
+
+    def _sig(good):
+        return "🟢" if good else "🔴"
+
+    # ── 단계 신호등 카드 (전월 대비 · 전월 평균 성과 병기) ──
+    _cur = _funnel_totals(fdf, _sel, _selm)
+    _prev = _funnel_totals(fdf, _prevm, _selm) if _prevm else None
+    st.markdown(f"###### {_sel} · {_selm} — 단계별 지표 " + (f"(전월 {_prevm} 대비)" if _prevm else "(전월 없음)"))
+    _k1, _k2, _k3, _k4 = st.columns(4)
+    _specs = [
+        (_k1, "① DB단가", "DB단가", lambda x: f"{x:,.0f}원", False, "inverse"),
+        (_k2, "② 내원율", "내원율", lambda x: f"{x:.1f}%", True, "normal"),
+        (_k3, "③ 객단가", "객단가", lambda x: f"{x/1e6:.2f}M", True, "normal"),
+        (_k4, "종합 ROAS", "ROAS", lambda x: f"{x:.0f}%", True, "normal"),
+    ]
+    for _col, _lab, _key, _fmt1, _up, _dcol in _specs:
+        if _prev:
+            _chg = _cur[_key] / _prev[_key] - 1
+            _good = (_chg >= 0) if _up else (_chg <= 0)
+            _tag = "" if _key == "ROAS" else f" {_sig(_good)}"
+            _col.metric(_lab, _fmt1(_cur[_key]), f"{_chg*100:+.0f}%{_tag}", delta_color=_dcol)
+            _col.caption(f"전월 {_fmt1(_prev[_key])}")
+        else:
+            _col.metric(_lab, _fmt1(_cur[_key]))
+            _col.caption("전월 데이터 없음")
+
+    # ── 매체 × 지역별 상세 (조회 월 · 전월 나란히 비교) ──
+    st.markdown(f"###### {_sel} 매체별 성과")
+    _cm = fdf[fdf.month == _sel].copy()
+    if _selm != "전체":
+        _cm = _cm[_cm.media == _selm]
+    _cm["병목"] = _cm.apply(_bn, axis=1)
+    if _prevm:
+        _pm = fdf[fdf.month == _prevm].copy()
+        if _selm != "전체":
+            _pm = _pm[_pm.media == _selm]
+        _pm = _pm[["media", "region", "DB수", "내원율", "객단가", "ROAS"]].copy()
+        _pm.columns = ["media", "region", "DB수_p", "내원율_p", "객단가_p", "ROAS_p"]
+        _cm = _cm.merge(_pm, on=["media", "region"], how="left")
+        _disp = _cm[["media", "region", "DB비율", "DB수", "DB수_p", "내원율", "내원율_p",
+                     "객단가", "객단가_p", "ROAS", "ROAS_p", "병목"]].copy()
+        _disp.columns = ["매체", "지역", "DB비율%", "DB수", "DB수(전월)", "내원율%", "내원율%(전월)",
+                         "객단가", "객단가(전월)", "ROAS%", "ROAS%(전월)", "병목 단계"]
+        _fmt = {"DB비율%": "{:.1f}", "DB수": "{:,.0f}", "DB수(전월)": "{:,.0f}", "내원율%": "{:.1f}",
+                "내원율%(전월)": "{:.1f}", "객단가": "{:,.0f}", "객단가(전월)": "{:,.0f}",
+                "ROAS%": "{:.0f}", "ROAS%(전월)": "{:.0f}"}
+    else:
+        _disp = _cm[["media", "region", "DB비율", "DB수", "내원율", "객단가", "ROAS", "병목"]].copy()
+        _disp.columns = ["매체", "지역", "DB비율%", "DB수", "내원율%", "객단가", "ROAS%", "병목 단계"]
+        _fmt = {"DB비율%": "{:.1f}", "DB수": "{:,.0f}", "내원율%": "{:.1f}", "객단가": "{:,.0f}", "ROAS%": "{:.0f}"}
+    _disp = _disp.sort_values(["매체", "ROAS%"], ascending=[True, False])
+    st.dataframe(_disp.style.format(_fmt), use_container_width=True, hide_index=True, height=430)
+
+    # ── 단계별 3개월 변화율 (4월 대비 %) ──
+    st.markdown(f"###### {_selm} · 4월 대비 단계별 변화율")
+    _idx = {k: [] for k in ["DB단가", "내원율", "객단가", "ROAS"]}
+    _b = _funnel_totals(fdf, "4월", _selm)
+    for m in _MON:
+        tt = _funnel_totals(fdf, m, _selm)
+        for k in _idx:
+            _idx[k].append((tt[k] / _b[k] - 1) * 100)
+    _fig = _go.Figure()
+    _cmap = {"DB단가": RED, "내원율": GREEN, "객단가": ACCENT, "ROAS": AMBER}
+    _lbl = {"DB단가": "① DB단가", "내원율": "② 내원율", "객단가": "③ 객단가", "ROAS": "종합 ROAS"}
+    for k, v in _idx.items():
+        _fig.add_trace(_go.Scatter(x=_MON, y=v, mode="lines+markers", name=_lbl[k],
+                                   line=dict(color=_cmap[k], width=3)))
+    _fig.add_hline(y=0, line_dash="dot", line_color=MUTED)
+    _fig.update_yaxes(ticksuffix="%")
+    st.plotly_chart(chart(_fig, 280), use_container_width=True)
+    st.caption("4월을 0%로 두고 매월 얼마나 오르내렸는지 봅니다. DB단가는 낮을수록·나머지는 높을수록 좋으므로, "
+               "빨간선(① DB단가)만 위로 오르면 DB생성 단계가 성과를 갉아먹는 병목이라는 뜻입니다.")
