@@ -1114,42 +1114,94 @@ elif active == TAB_NAMES[4]:
 # 6) 🔁 중복률
 # ============================================================
 elif active == TAB_NAMES[5]:
-    st.markdown("### 🔁 월간 중복DB 현황")
-    st.caption("해당월 전체 DB에서 연락처 중복 측정. 첫 등장은 unique, 이후 등장은 중복으로 카운트.")
-    c1, c2, c3 = st.columns([1, 2, 2])
-    _bd = c1.date_input("기준일 (달력에서 다른 달도 선택)", value=TODAY.date(), min_value=df.date.min(), max_value=TODAY, key="dup_date")
+    st.markdown("### 🔁 중복DB 현황")
+    st.caption("선택 기간 전체 DB에서 연락처 중복 측정. 첫 등장은 unique, 이후 등장은 중복으로 카운트. "
+               "조회 기간이 길수록 중복률이 올라갑니다 (같은 번호의 재등장 확률↑).")
+
+    # ── 조회 단위 선택 (일 / 주 / 월 / 기간) ──
+    unit = st.radio("조회 단위", ["일별", "주별", "월별", "기간 설정"],
+                    horizontal=True, index=2, key="dup_unit")
+    _dmin = df.date.min()
+    c1, c2 = st.columns([2, 2])
+    if unit == "일별":
+        _bd = c1.date_input("기준일", value=TODAY.date(), min_value=_dmin, max_value=TODAY, key="dup_day")
+        s = e = pd.Timestamp(_bd); plabel = f"{s:%Y-%m-%d}"
+    elif unit == "주별":
+        _bd = c1.date_input("기준일 (해당 주)", value=TODAY.date(), min_value=_dmin, max_value=TODAY, key="dup_week")
+        _b = pd.Timestamp(_bd); s = _b - pd.Timedelta(days=_b.weekday()); e = s + pd.Timedelta(days=6)
+        plabel = f"{s:%m/%d}(월)~{e:%m/%d}(일)"
+    elif unit == "월별":
+        _bd = c1.date_input("기준일 (달력에서 다른 달도 선택)", value=TODAY.date(), min_value=_dmin, max_value=TODAY, key="dup_month")
+        s = pd.Timestamp(_bd.year, _bd.month, 1); e = s + pd.offsets.MonthEnd(1)
+        plabel = f"{_bd.year}년 {_bd.month}월"
+    else:  # 기간 설정
+        cc = c1.columns(2)
+        _s = cc[0].date_input("시작일", value=(TODAY - pd.Timedelta(days=13)).date(), min_value=_dmin, max_value=TODAY, key="dup_s")
+        _e = cc[1].date_input("종료일", value=TODAY.date(), min_value=_dmin, max_value=TODAY, key="dup_e")
+        s, e = pd.Timestamp(_s), pd.Timestamp(_e)
+        if s > e: s, e = e, s
+        plabel = f"{s:%m/%d}~{e:%m/%d}"
     c2.multiselect("매체 필터", CHS, default=CHS, key="dup_media")
-    c3.info(f"기준월: **{_bd.year}년 {_bd.month}월**")
+    e = min(e, TODAY); win = max(1, (e - s).days + 1)
+
+    # ── 전체 범위 일자별 중복률·DB 모델 (차단 적용 후 하락 추세) ──
+    np.random.seed(110)
+    alld = pd.date_range(_dmin, TODAY, freq="D"); _n = len(alld); _blk = int(_n * 0.55)
+    base_rate = np.array([max(7.0, 20 - (0 if i < _blk else (i - _blk) / max(1, _n - _blk) * 7)
+                               + np.random.uniform(-1.0, 1.0)) for i in range(_n)])
+    daily_db = np.array([int(np.random.uniform(900, 1500) / 30) for _ in range(_n)])  # 일 DB (전 매체 합)
+    ddf = pd.DataFrame({"date": alld, "rate": base_rate, "db": daily_db})
+
+    # ── 기간 집계 (기간 길수록 중복률↑) ──
+    seg = ddf[(ddf.date >= s) & (ddf.date <= e)]
+    if seg.empty: seg = ddf.tail(1)
+    win_factor = min(1.15, 0.30 + 0.70 * min(win, 30) / 30)   # 1일≈0.32 · 7일≈0.46 · 30일=1.0
+    period_db = int(seg.db.sum())
+    period_rate = float(np.average(seg.rate, weights=seg.db)) * win_factor
+    period_dup = int(period_db * period_rate / 100)
+
+    k = st.columns(4)
+    k[0].metric(f"{plabel} 합산 DB", f"{period_db:,}")
+    k[1].metric("중복 DB", f"{period_dup:,}")
+    k[2].metric("중복률", f"{period_rate:.1f}%")
+    k[3].metric("조회 단위", f"{unit} · {win}일")
+
+    # ── 추이 차트 (단위에 맞게) ──
+    st.markdown("#### 📈 중복률 추이")
+    if unit == "주별":
+        rows = []
+        for wk, x in ddf.groupby(ddf.date.dt.to_period("W-SUN")):
+            rows.append((x.date.min(), round(float(np.average(x.rate, weights=x.db)) * 0.46, 1)))
+        g = pd.DataFrame(rows, columns=["x", "r"]).tail(12)
+        xv, yv, xtitle, xfmt = g.x, g.r, "주(시작일)", "%m/%d"
+    elif unit == "월별":
+        p = ddf[(ddf.date >= s) & (ddf.date <= e)]
+        xv, yv, xtitle, xfmt = p.date.dt.day, p.rate.round(1), "일", None
+    elif unit == "일별":
+        p = ddf.tail(30)
+        xv, yv, xtitle, xfmt = p.date, (p.rate * 0.32).round(1), "최근 30일", "%m/%d"
+    else:  # 기간 설정
+        xv, yv, xtitle, xfmt = seg.date, (seg.rate * win_factor).round(1), "일", "%m/%d"
+    _f = go.Figure()
+    _f.add_trace(go.Scatter(x=xv, y=yv, mode="lines+markers", line=dict(color=ACCENT, width=2.5),
+                            marker=dict(size=5), fill="tozeroy", fillcolor="rgba(99,102,241,0.12)"))
+    _f.update_xaxes(title=xtitle)
+    if xfmt: _f.update_xaxes(tickformat=xfmt)
+    _f.update_yaxes(title="중복률(%)")
+    st.plotly_chart(chart(_f, 280), use_container_width=True)
+    st.caption("ℹ️ 차단(동일번호 폼 차단) 적용 이후 중복률이 하락하는 추세를 보여줍니다.")
+
+    # ── 캠페인별 기간 누적 중복률 ──
+    st.markdown(f"#### 📊 캠페인별 누적 중복률 · {plabel}")
     np.random.seed(11)
     camps = sorted(df.campaign.unique())
-    month_db = {c: int(np.random.uniform(800, 1600)) for c in camps}
-    dup_rate = {c: round(np.random.uniform(12, 22), 1) for c in camps}
-    tot_db = sum(month_db.values()); tot_dup = sum(int(month_db[c] * dup_rate[c] / 100) for c in camps)
-    k = st.columns(5)
-    k[0].metric("월 합산 DB", f"{tot_db:,}")
-    k[1].metric("중복 DB", f"{tot_dup:,}")
-    k[2].metric("월 중복률", f"{tot_dup/tot_db*100:.1f}%")
-    k[3].metric(f"{_bd.strftime('%m/%d')} DB", f"{int(tot_db/15):,}")
-    k[4].metric(f"{_bd.strftime('%m/%d')} 중복 DB", f"{int(tot_db/15*np.random.uniform(0.1,0.18)):,}")
-
-    st.markdown("#### 📈 월 DB 중복률 추이")
-    np.random.seed(110)
-    ndays = (pd.Timestamp(_bd.year, _bd.month, 1) + pd.offsets.MonthEnd(1)).day  # 선택월 마지막 날
-    _blk = int(ndays * 0.4)                                                          # 차단 적용 시점
-    trend = [round(max(8, 23 - (0 if x < _blk else (x - _blk) / (ndays - _blk) * 8) + np.random.uniform(-1.2, 1.2)), 1) for x in range(ndays)]
-    _f = go.Figure()
-    _f.add_trace(go.Scatter(x=list(range(1, ndays + 1)), y=trend, mode="lines", line=dict(color=ACCENT, width=2.5),
-                            fill="tozeroy", fillcolor="rgba(99,102,241,0.12)"))
-    _f.add_vline(x=_blk, line_dash="dash", line_color=RED, annotation_text="차단 적용")
-    _f.update_xaxes(range=[0.5, ndays + 0.5], dtick=5, title="일")
-    st.plotly_chart(chart(_f, 280), use_container_width=True)
-
-    st.markdown("#### 📊 캠페인별 해당월 누적 중복률")
-    dt = pd.DataFrame({"캠페인": camps, "월합산": [month_db[c] for c in camps],
-                       "월내중복건": [int(month_db[c] * dup_rate[c] / 100) for c in camps],
-                       "월내중복률": [f"{dup_rate[c]:.1f}%" for c in camps]})
-    dt["월합산"] = dt["월합산"].map(lambda x: f"{x:,}")
-    st.dataframe(dt, use_container_width=True, hide_index=True)
+    sh = np.random.uniform(0.6, 1.4, len(camps)); sh = sh / sh.sum()
+    rows = []
+    for c, w in zip(camps, sh):
+        cdb = int(period_db * w)
+        crate = round(min(26, max(2, period_rate * np.random.uniform(0.82, 1.2))), 1)
+        rows.append({"캠페인": c, "기간 합산 DB": f"{cdb:,}", "중복 건": f"{int(cdb * crate / 100):,}", "중복률": f"{crate:.1f}%"})
+    st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 # ============================================================
 # 7) 📺 노출 유튜브 채널
